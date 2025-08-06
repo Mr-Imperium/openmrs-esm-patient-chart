@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Tile } from '@carbon/react';
+import { DataTableSkeleton, InlineLoading, Tile } from '@carbon/react';
 import { ResponsiveWrapper, useConfig, useConnectivity } from '@openmrs/esm-framework';
+import { debounce } from 'lodash-es';
 import {
   type DefaultPatientWorkspaceProps,
   EmptyDataIllustration,
@@ -34,8 +35,11 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
   const isOnline = useConnectivity();
   const { currentVisit } = useVisitOrOfflineVisit(patientUuid);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState<boolean>(false);
 
   const useInfiniteScrolling = enableInfiniteScrolling ?? config.enableInfiniteScrolling;
+
+  // Always use infinite forms for search to support server-side filtering
   const infiniteFormsResult = useInfiniteForms(
     patientUuid,
     currentVisit?.uuid,
@@ -46,8 +50,10 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
     searchQuery,
   );
 
+  // Only use regular forms when not searching
   const regularFormsResult = useForms(patientUuid, currentVisit?.uuid, undefined, undefined, !isOnline, config.orderBy);
 
+  // Use infinite forms result when searching or when infinite scrolling is enabled
   const {
     data: forms,
     allForms,
@@ -58,7 +64,7 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
     hasMore,
     isLoading,
     totalLoaded,
-  } = useInfiniteScrolling
+  } = searchQuery || useInfiniteScrolling
     ? infiniteFormsResult
     : {
         ...regularFormsResult,
@@ -67,6 +73,13 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
         isLoading: false,
         totalLoaded: regularFormsResult.allForms?.length || 0,
       };
+
+  // Reset isSearching when data is fetched
+  useEffect(() => {
+    if (isSearching && !isValidating && !isLoading) {
+      setIsSearching(false);
+    }
+  }, [isSearching, isValidating, isLoading]);
 
   const htmlFormEntryForms = useMemo(() => {
     return mapFormsToHtmlFormEntryForms(allForms, config.htmlFormEntryForms);
@@ -100,9 +113,13 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
     ],
   );
 
-  const handleSearch = useCallback((query: string) => {
-    setSearchQuery(query);
-  }, []);
+  // Use a memoized debounced search function
+  const handleSearch = useMemo(() => {
+    return debounce((query: string) => {
+      setIsSearching(true);
+      setSearchQuery(query);
+    }, 500);
+  }, []); // Empty dependencies since setIsSearching and setSearchQuery are stable
 
   const sections = useMemo(() => {
     return config.formSections?.map((formSection) => ({
@@ -113,7 +130,22 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
     }));
   }, [config.formSections, forms]);
 
-  if (forms?.length === 0) {
+  // Show loading state when searching
+  if (isSearching) {
+    return (
+      <ResponsiveWrapper>
+        <div className={styles.searchingContainer}>
+          <div className={styles.searchingMessage}>
+            <InlineLoading description={t('searchingForms', 'Searching forms...')} status="active" />
+          </div>
+          <DataTableSkeleton role="progressbar" />
+        </div>
+      </ResponsiveWrapper>
+    );
+  }
+
+  // Don't show empty state during search or initial loading
+  if (forms?.length === 0 && !isSearching && !isLoading && !isValidating) {
     return (
       <ResponsiveWrapper>
         <Tile className={styles.emptyState}>
@@ -138,6 +170,7 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
           isLoading={isLoading}
           totalLoaded={totalLoaded}
           enableInfiniteScrolling={useInfiniteScrolling}
+          isSearching={isSearching}
         />
       ) : (
         sections.map((section) => {
@@ -155,6 +188,7 @@ const FormsDashboard: React.FC<FormsDashboardProps> = ({
               isLoading={isLoading}
               totalLoaded={totalLoaded}
               enableInfiniteScrolling={useInfiniteScrolling}
+              isSearching={isSearching}
             />
           );
         })

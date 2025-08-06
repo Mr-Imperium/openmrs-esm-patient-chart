@@ -21,6 +21,7 @@ export type FormsListProps = {
   isLoading?: boolean;
   totalLoaded?: number;
   enableInfiniteScrolling?: boolean;
+  isSearching?: boolean;
 };
 
 /*
@@ -40,6 +41,7 @@ const FormsList: React.FC<FormsListProps> = ({
   isLoading,
   totalLoaded = 0,
   enableInfiniteScrolling = false,
+  isSearching = false,
 }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,7 +64,7 @@ const FormsList: React.FC<FormsListProps> = ({
       debounce((searchTerm: string) => {
         setSearchTerm(searchTerm);
         onSearch?.(searchTerm);
-      }, 1000),
+      }, 500), // Match the debounce time with FormsDashboard
     [onSearch],
   );
 
@@ -114,8 +116,8 @@ const FormsList: React.FC<FormsListProps> = ({
   }, []);
 
   const filteredForms = useMemo(() => {
-    // If using infinite scrolling with server-side search, don't filter client-side
-    if (enableInfiniteScrolling && onSearch) {
+    // If search is handled server-side through onSearch function, just use the results directly
+    if (onSearch && searchTerm) {
       return completedForms;
     }
 
@@ -123,11 +125,16 @@ const FormsList: React.FC<FormsListProps> = ({
       return completedForms;
     }
 
+    // Ensure we have forms to filter
+    if (!completedForms || completedForms.length === 0) {
+      return [];
+    }
+
     return fuzzy
       .filter(searchTerm, completedForms, { extract: (formInfo) => formInfo.form.display ?? formInfo.form.name })
-      .sort((r1, r2) => r1.score - r2.score)
+      .sort((r1, r2) => r2.score - r1.score) // Sort by best match first
       .map((result) => result.original);
-  }, [completedForms, searchTerm, enableInfiniteScrolling, onSearch]);
+  }, [completedForms, searchTerm, onSearch]);
 
   const tableHeaders = useMemo(() => {
     return [
@@ -161,8 +168,33 @@ const FormsList: React.FC<FormsListProps> = ({
     return <DataTableSkeleton role="progressbar" />;
   }
 
-  if (completedForms?.length === 0 && !isLoading) {
+  // Show loading state during searching regardless of infinite scrolling
+  if (isSearching || (searchTerm && (isLoading || isValidating))) {
+    return (
+      <div>
+        <div className={styles.searchingMessage}>
+          <InlineLoading description={t('searchingForms', 'Searching forms...')} status="active" />
+        </div>
+        <DataTableSkeleton role="progressbar" />
+      </div>
+    );
+  }
+
+  // If there are no forms but we're not loading, just return empty fragment
+  // Don't show empty state in FormsList - this is handled by FormsDashboard
+  if ((!completedForms || completedForms.length === 0) && !isLoading && !isValidating) {
     return <></>;
+  }
+
+  // If we have search term but no filtered forms
+  if (searchTerm && tableRows.length === 0 && !isLoading && !isValidating && !isSearching) {
+    return (
+      <ResponsiveWrapper>
+        <div className={styles.noSearchResults}>
+          {t('noSearchResults', 'No forms match your search "{{searchTerm}}".', { searchTerm })}
+        </div>
+      </ResponsiveWrapper>
+    );
   }
 
   const tableComponent = enableInfiniteScrolling ? (
@@ -200,7 +232,7 @@ const FormsList: React.FC<FormsListProps> = ({
       tableHeaders={tableHeaders}
       tableRows={tableRows}
       isTablet={isTablet}
-      handleSearch={handleSearch}
+      handleSearch={onSearch ? onSearch : handleSearch}
       handleFormOpen={handleFormOpen}
       totalLoaded={totalLoaded}
     />
