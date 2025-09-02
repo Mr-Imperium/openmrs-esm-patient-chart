@@ -16,27 +16,25 @@ import {
   TableContainer,
   TableExpandedRow,
 } from '@carbon/react';
-import { orderBy, get, first } from 'lodash-es';
+import { orderBy } from 'lodash-es';
 import {
   AddIcon,
   formatDate,
+  launchWorkspace,
   parseDate,
   useConfig,
   useLayoutType,
   usePagination,
   useVisit,
-  launchWorkspace,
 } from '@openmrs/esm-framework';
 import { CardHeader, EmptyState, ErrorState, PatientChartPagination } from '@openmrs/esm-patient-common-lib';
 import { immunizationFormSub, latestFirst, linkConfiguredSequences } from './utils';
-import { type ExistingDoses, type Sequence } from '../types';
 import { useImmunizations } from '../hooks/useImmunizations';
 import SequenceTable from './components/immunizations-sequence-table.component';
 import styles from './immunizations-detailed-summary.scss';
 
 interface ImmunizationsDetailedSummaryProps {
   patientUuid: string;
-  basePath: string;
   launchStartVisitPrompt: () => void;
 }
 
@@ -48,8 +46,6 @@ const ImmunizationsDetailedSummary: React.FC<ImmunizationsDetailedSummaryProps> 
   const { immunizationsConfig } = useConfig();
   const displayText = t('immunizations__lower', 'immunizations');
   const headerTitle = t('immunizations', 'Immunizations');
-  const pageUrl = window.getOpenmrsSpaBase() + `patient/${patientUuid}/chart`;
-  const urlLabel = t('goToSummary', 'Go to Summary');
   const { currentVisit } = useVisit(patientUuid);
   const isTablet = useLayoutType() === 'tablet';
   const sequenceDefinitions = immunizationsConfig?.sequenceDefinitions;
@@ -165,9 +161,10 @@ const ImmunizationsDetailedSummary: React.FC<ImmunizationsDetailedSummaryProps> 
         <CardHeader title={headerTitle}>
           <span>{isValidating ? <InlineLoading /> : null}</span>
           <Button
+            data-testid="add-immunizations-button"
+            iconDescription={t('addImmunizations', 'Add immunizations')}
             kind="ghost"
             renderIcon={(props: ComponentProps<typeof AddIcon>) => <AddIcon size={16} {...props} />}
-            iconDescription={t('addImmunizations', 'Add immunizations')}
             onClick={launchImmunizationsForm}
           >
             {t('add', 'Add')}
@@ -185,7 +182,7 @@ const ImmunizationsDetailedSummary: React.FC<ImmunizationsDetailedSummaryProps> 
             getExpandHeaderProps,
           }) => (
             <TableContainer>
-              <Table aria-label="immunizations summary" {...getTableProps()}>
+              <Table aria-label="immunizations summary" size={isTablet ? 'md' : 'sm'} {...getTableProps()}>
                 <TableHead>
                   <TableRow>
                     <TableExpandHeader enableToggle {...getExpandHeaderProps()} />
@@ -227,8 +224,6 @@ const ImmunizationsDetailedSummary: React.FC<ImmunizationsDetailedSummaryProps> 
             onPageNumberChange={({ page }) => goTo(page)}
             pageNumber={currentPage}
             currentItems={paginatedImmunizations?.length}
-            dashboardLinkUrl={pageUrl}
-            dashboardLinkLabel={urlLabel}
           />
         </div>
       </div>

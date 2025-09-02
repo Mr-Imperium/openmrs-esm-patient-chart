@@ -22,7 +22,7 @@ import { DoseInput } from './components/dose-input.component';
 import { immunizationFormSub } from './utils';
 import { mapToFHIRImmunizationResource } from './immunization-mapper';
 import { savePatientImmunization } from './immunizations.resource';
-import { type ConfigObject } from '../config-schema';
+import { type ImmunizationConfigObject } from '../config-schema';
 import { type ImmunizationFormData } from '../types';
 import { useImmunizations } from '../hooks/useImmunizations';
 import { useImmunizationsConceptSet } from '../hooks/useImmunizationsConceptSet';
@@ -35,12 +35,12 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
   closeWorkspaceWithSavedChanges,
   promptBeforeClosing,
 }) => {
+  const config = useConfig<ImmunizationConfigObject>();
   const currentUser = useSession();
   const isTablet = useLayoutType() === 'tablet';
   const { t } = useTranslation();
   const { currentVisit } = useVisit(patientUuid);
-  const { immunizationsConfig } = useConfig<ConfigObject>();
-  const { immunizationsConceptSet } = useImmunizationsConceptSet(immunizationsConfig);
+  const { immunizationsConceptSet } = useImmunizationsConceptSet(config);
   const { mutate } = useImmunizations(patientUuid);
 
   const [immunizationToEditMeta, setImmunizationToEditMeta] = useState<{
@@ -56,19 +56,23 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
         .min(new Date(patient.birthDate), {
           message: t('vaccinationDateCannotBeBeforeBirthDate', 'Vaccination date cannot precede birth date'),
         })
-        .refine((vaccinationDate) => vaccinationDate <= new Date(), {
-          message: t('vaccinationDateCannotBeInTheFuture', 'Vaccination date cannot be in the future'),
-        }),
-      doseNumber: z
-        .number()
-        .nullable()
-        // The backend will attempt to convert the dose number to a positive integer
-        // so we need to set it to null if the value is less than 1
-        .transform((value) => (value < 1 ? null : value)),
+        .refine(
+          (date) => {
+            // Normalize both dates to start of day in local timezone
+            const inputDate = dayjs(date).startOf('day');
+            const today = dayjs().startOf('day');
+            return inputDate.isSame(today) || inputDate.isBefore(today);
+          },
+          {
+            message: t('vaccinationDateCannotBeInTheFuture', 'Vaccination date cannot be in the future'),
+          },
+        ),
+      // null means unset; when provided, must be an integer ≥ 1
+      doseNumber: z.union([z.number({ coerce: true }).int().min(1), z.null()]).optional(),
       note: z.string().trim().max(255).optional(),
-      expirationDate: z.date().nullable(),
-      lotNumber: z.string().nullable(),
-      manufacturer: z.string().nullable(),
+      expirationDate: z.date().nullable().optional(),
+      lotNumber: z.string().nullable().optional(),
+      manufacturer: z.string().nullable().optional(),
     });
   }, [patient.birthDate, t]);
 
@@ -78,7 +82,7 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
     resolver: zodResolver(immunizationFormSchema),
     defaultValues: {
       vaccineUuid: '',
-      vaccinationDate: new Date(),
+      vaccinationDate: dayjs().startOf('day').toDate(),
       doseNumber: 1,
       note: '',
       expirationDate: null,
@@ -119,7 +123,6 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
     });
 
     return () => {
-      // cleanup
       sub.unsubscribe();
       immunizationFormSub.next(null);
     };
@@ -184,7 +187,7 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
   );
   return (
     <FormProvider {...formProps}>
-      <Form className={styles.form} onSubmit={handleSubmit(onSubmit)} data-testid="immunization-form">
+      <Form className={styles.form} onSubmit={handleSubmit(onSubmit)}>
         <Stack gap={5} className={styles.container}>
           <ResponsiveWrapper>
             <Controller
@@ -194,7 +197,6 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
                 <OpenmrsDatePicker
                   {...field}
                   className={styles.datePicker}
-                  data-testid="vaccinationDate"
                   id="vaccinationDate"
                   invalid={Boolean(fieldState?.error?.message)}
                   invalidText={fieldState?.error?.message}
@@ -228,7 +230,7 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
           </ResponsiveWrapper>
           {vaccineUuid && (
             <ResponsiveWrapper>
-              <DoseInput vaccine={vaccineUuid} sequences={immunizationsConfig.sequenceDefinitions} control={control} />
+              <DoseInput vaccine={vaccineUuid} sequences={config.sequenceDefinitions} control={control} />
             </ResponsiveWrapper>
           )}
           <ResponsiveWrapper>
@@ -288,12 +290,11 @@ const ImmunizationsForm: React.FC<DefaultPatientWorkspaceProps> = ({
                 <OpenmrsDatePicker
                   {...field}
                   className={styles.datePicker}
-                  data-testid="vaccinationExpiration"
                   id="vaccinationExpiration"
                   invalid={Boolean(fieldState?.error?.message)}
                   invalidText={fieldState?.error?.message}
                   labelText={t('expirationDate', 'Expiration date')}
-                  minDate={immunizationToEditMeta ? null : new Date()}
+                  minDate={immunizationToEditMeta ? null : dayjs().startOf('day').toDate()}
                 />
               )}
             />
